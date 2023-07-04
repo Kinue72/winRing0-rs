@@ -18,8 +18,8 @@ The crates are not currently published on crates.io and are under development. I
 
 ```
 [target.'cfg(windows)'.dependencies]
-win-kernel-driver = { git = "https://github.com/alex-dow/winRing0-rs" }
-win_ring0 = { git = "https://github.com/alex-dow/winRing0-rs" }
+win-kernel-driver = { git = "https://github.com/Kinue72/winRing0-rs" }
+win_ring0 = { git = "https://github.com/Kinue72/winRing0-rs" }
 ```
 
 You could potentially leverage these crates with the [x86 crate](https://docs.rs/x86/0.33.0/x86/).

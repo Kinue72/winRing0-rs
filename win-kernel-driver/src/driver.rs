@@ -2,8 +2,7 @@ use std::path::PathBuf;
 use std::ffi::OsString;
 use std::ptr::null_mut;
 use std::mem::size_of;
-use std::ffi::{c_void, CString};
-use std::convert::TryFrom;
+use std::ffi::CString;
 use std::env;
 use std::fs::File;
 use std::io::Write;
@@ -133,6 +132,17 @@ impl DriverBuilder {
         if self.driver_bin.len() == 0 && self.driver_path.components().count() == 0 {
             return Err("Either a path to the driver file, or a binary array of the driver file, must be set".to_owned());
         }
+
+
+        let tmp = WinKernelDriver {
+            service_description: self.device_description,
+            driver_path: Default::default(),
+            device_id: self.device_id,
+            device: None,
+        };
+
+        let _ = tmp.uninstall();
+
 
         if self.driver_bin.len() > 0 {
             let mut dir = PathBuf::from(env::temp_dir());
@@ -286,10 +296,11 @@ impl WinKernelDriver {
         let mut driver_path_t: String = r"\\.\".to_string();
         driver_path_t.push_str(self.device_id);
         let driver_path = driver_path_t.as_str();
+        let file_name = CString::new(driver_path).unwrap();
 
         unsafe {
             let device: winnt::HANDLE = fileapi::CreateFileA(
-                CString::new(driver_path).unwrap().as_ptr(),
+                file_name.as_ptr(),
                 winnt::GENERIC_READ | winnt::GENERIC_WRITE,
                 0,
                 null_mut(),
@@ -300,9 +311,10 @@ impl WinKernelDriver {
 
             if device == handleapi::INVALID_HANDLE_VALUE {
                 return Err("Error occurred getting handle on kernel driver".to_string());
-            } else {
-                println!("Handle created");
             }
+            // else {
+            //     println!("Handle created");
+            // }
             
             self.device = Some(device);
         }
@@ -333,12 +345,24 @@ impl WinKernelDriver {
         Ok(())
     }
 
-    /// Perform an IO command on the driver.
+    /// Perform an IO command on the driver with u32.
     /// 
     /// To know which IO commands are available, you must check with the driver
     /// you are trying to work with. IO control codes should be made with
     /// the [io_control_code] function.
-    pub fn io(&self, ioctl_code: u32, mut in_buffer: u32) -> Result<u64, String> {
+    pub fn io(&self, ioctl_code: u32, in_buffer: u32) -> Result<u64, String> {
+        let buffer: [u8; 4] = unsafe { std::mem::transmute(in_buffer) };
+
+        self.io_buffer(ioctl_code, buffer.as_slice())
+    }
+
+
+    /// Perform an IO command on the driver with slice.
+    ///
+    /// To know which IO commands are available, you must check with the driver
+    /// you are trying to work with. IO control codes should be made with
+    /// the [io_control_code] function.
+    pub fn io_buffer(&self, ioctl_code: u32, in_buffer: &[u8]) -> Result<u64, String> {
         if !self.opened() {
             return Err("Driver not opened!".to_string());
         }
@@ -346,9 +370,6 @@ impl WinKernelDriver {
         let device = self.device.unwrap() as winnt::HANDLE;
 
         let mut out_buffer = [0u8; size_of::<u64>()];
-        let in_buffer_bytes = in_buffer.to_be_bytes();
-
-        let in_buffer_size = u32::try_from(in_buffer_bytes.len()).unwrap() as DWORD;
         let out_buffer_size = out_buffer.len() as u32;
         let mut out_buffer_written: DWORD = 0;
 
@@ -356,8 +377,8 @@ impl WinKernelDriver {
             let res = ioapiset::DeviceIoControl(
                 device,
                 ioctl_code,
-                &mut in_buffer as *mut _ as *mut c_void,
-                in_buffer_size,
+                in_buffer.as_ptr() as _,
+                in_buffer.len() as _,
                 out_buffer.as_mut_ptr() as *mut _,
                 out_buffer_size,
                 &mut out_buffer_written,
@@ -372,5 +393,5 @@ impl WinKernelDriver {
                 return Err(format!("DeviceIoControl - Unable to write command {:x}. Last error code: {:x}", ioctl_code, last_error));
             }
         }
-    }    
+    }
 }
